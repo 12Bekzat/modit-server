@@ -23,13 +23,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CatalogImportService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(CatalogImportService.class);
     private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(2);
+    private static final int LOG_RESPONSE_BODY_LIMIT = 4_000;
     private static final String DEFAULT_CATEGORY = "Другое";
     private static final String DEFAULT_BRAND = "Vend";
     private static final String DEFAULT_CURRENCY = "KZT";
@@ -257,7 +261,11 @@ public class CatalogImportService {
         query.put("access-token", settings.getAccessToken());
         query.putAll(params);
 
-        HttpRequest request = HttpRequest.newBuilder(buildUri(trimTrailingSlash(settings.getApiBaseUrl()) + path, query))
+        URI requestUri = buildUri(trimTrailingSlash(settings.getApiBaseUrl()) + path, query);
+        String safeUri = sanitizeCatalogApiUri(requestUri);
+        LOGGER.info("Catalog API request prepared: path={}, url={}, params={}", path, safeUri, sanitizeParams(query));
+
+        HttpRequest request = HttpRequest.newBuilder(requestUri)
             .GET()
             .timeout(REQUEST_TIMEOUT)
             .header("User-Agent", "Mozilla/5.0")
@@ -266,9 +274,17 @@ public class CatalogImportService {
 
         for (int attempt = 0; attempt < 3; attempt++) {
             throttleRequests(settings);
+            LOGGER.info("Catalog API request attempt {}/3: {}", attempt + 1, safeUri);
 
             try {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                LOGGER.info(
+                    "Catalog API response attempt {}/3: status={}, body={}",
+                    attempt + 1,
+                    response.statusCode(),
+                    logBody(response.body())
+                );
+
                 if (response.statusCode() >= 400) {
                     throw new IllegalStateException(
                         "Catalog API returned HTTP " + response.statusCode() + ": " + fit(response.body(), 500)
@@ -277,10 +293,23 @@ public class CatalogImportService {
 
                 JsonNode payload = objectMapper.readTree(response.body());
                 if (payload.path("success").isBoolean() && !payload.path("success").asBoolean()) {
+                    LOGGER.warn(
+                        "Catalog API returned success=false attempt {}/3: message={}, body={}",
+                        attempt + 1,
+                        text(payload.path("message")),
+                        logBody(response.body())
+                    );
                     throw new IllegalStateException(firstNonBlank(text(payload.path("message")), "Catalog API request failed."));
                 }
                 return payload;
             } catch (Exception exception) {
+                LOGGER.warn(
+                    "Catalog API request failed attempt {}/3: url={}, error={}",
+                    attempt + 1,
+                    safeUri,
+                    exception.toString(),
+                    exception
+                );
                 if (attempt >= 2) {
                     throw new IllegalStateException("Failed to import catalog from API.", exception);
                 }
@@ -315,6 +344,28 @@ public class CatalogImportService {
             );
         }
         return URI.create(baseUrl + "?" + query);
+    }
+
+    private Map<String, String> sanitizeParams(Map<String, String> params) {
+        Map<String, String> sanitized = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            sanitized.put(entry.getKey(), "access-token".equals(entry.getKey()) ? "***" : entry.getValue());
+        }
+        return sanitized;
+    }
+
+    private String sanitizeCatalogApiUri(URI uri) {
+        return uri.toString().replaceAll("(?i)(access-token=)[^&]*", "$1***");
+    }
+
+    private String logBody(String body) {
+        if (body == null || body.isBlank()) {
+            return "<empty>";
+        }
+        String normalized = body.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= LOG_RESPONSE_BODY_LIMIT
+            ? normalized
+            : normalized.substring(0, LOG_RESPONSE_BODY_LIMIT) + "...<truncated>";
     }
 
     private CatalogImportSettings getOrCreateSettings() {
