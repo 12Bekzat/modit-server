@@ -16,6 +16,22 @@ APP_ADMIN_FULL_NAME=...
 APP_ADMIN_PHONE=...
 ```
 
+`DB_URL` examples:
+
+```properties
+# PostgreSQL installed on the same VPS as the Java process
+DB_URL=jdbc:postgresql://127.0.0.1:5432/magazine_db
+
+# Managed database from a hosting provider
+DB_URL=jdbc:postgresql://provider-internal-host:5432/magazine_db
+
+# Docker Compose only: backend and postgres are in the same compose network,
+# and the database service is actually named "postgres"
+DB_URL=jdbc:postgresql://postgres:5432/magazine_db
+```
+
+Do not use `postgres` as the host unless Docker DNS can resolve that service name from the backend container. If the backend is running directly on a VPS or in a separate hosting service, use the real database hostname/IP from that environment.
+
 Optional backend variables:
 
 ```properties
