@@ -270,7 +270,9 @@ public class CatalogImportService {
             try {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() >= 400) {
-                    throw new IllegalStateException("Catalog API returned HTTP " + response.statusCode());
+                    throw new IllegalStateException(
+                        "Catalog API returned HTTP " + response.statusCode() + ": " + fit(response.body(), 500)
+                    );
                 }
 
                 JsonNode payload = objectMapper.readTree(response.body());
@@ -333,7 +335,7 @@ public class CatalogImportService {
     }
 
     private int resolvePageSize(CatalogImportSettings settings) {
-        if (settings.getPageSize() == null || settings.getPageSize() < 0) {
+        if (settings.getPageSize() == null || settings.getPageSize() <= 0) {
             return 250;
         }
         return settings.getPageSize();
