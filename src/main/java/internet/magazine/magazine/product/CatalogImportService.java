@@ -264,6 +264,7 @@ public class CatalogImportService {
         URI requestUri = buildUri(trimTrailingSlash(settings.getApiBaseUrl()) + path, query);
         String safeUri = sanitizeCatalogApiUri(requestUri);
         LOGGER.info("Catalog API request prepared: path={}, url={}, params={}", path, safeUri, sanitizeParams(query));
+        System.out.println("Catalog API request prepared: path=" + path + ", url=" + safeUri + ", params=" + sanitizeParams(query));
 
         HttpRequest request = HttpRequest.newBuilder(requestUri)
             .GET()
@@ -275,9 +276,14 @@ public class CatalogImportService {
         for (int attempt = 0; attempt < 3; attempt++) {
             throttleRequests(settings);
             LOGGER.info("Catalog API request attempt {}/3: {}", attempt + 1, safeUri);
+            System.out.println("Catalog API request attempt " + (attempt + 1) + "/3: " + safeUri);
 
             try {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                System.out.println(
+                    "Catalog API response attempt " + (attempt + 1) + "/3: status=" + response.statusCode() +
+                    ", body=" + logBody(response.body())
+                );
                 LOGGER.info(
                     "Catalog API response attempt {}/3: status={}, body={}",
                     attempt + 1,
@@ -293,6 +299,10 @@ public class CatalogImportService {
 
                 JsonNode payload = objectMapper.readTree(response.body());
                 if (payload.path("success").isBoolean() && !payload.path("success").asBoolean()) {
+                    System.out.println(
+                        "Catalog API returned success=false attempt " + (attempt + 1) + "/3: message=" +
+                        text(payload.path("message")) + ", body=" + logBody(response.body())
+                    );
                     LOGGER.warn(
                         "Catalog API returned success=false attempt {}/3: message={}, body={}",
                         attempt + 1,
@@ -303,6 +313,11 @@ public class CatalogImportService {
                 }
                 return payload;
             } catch (Exception exception) {
+                System.out.println(
+                    "Catalog API request failed attempt " + (attempt + 1) + "/3: url=" + safeUri +
+                    ", error=" + exception
+                );
+                exception.printStackTrace(System.out);
                 LOGGER.warn(
                     "Catalog API request failed attempt {}/3: url={}, error={}",
                     attempt + 1,
